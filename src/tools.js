@@ -2,6 +2,7 @@ import Cairo from 'gi://cairo';
 import Pango from 'gi://Pango';
 import PangoCairo from 'gi://PangoCairo';
 import Clutter from 'gi://Clutter';
+import { pixelate } from './pixelate.js';
 
 export const SELECTION_PADDING = 8;
 
@@ -36,6 +37,36 @@ function makeStrokeBounds(padFn) {
 
 function standardHitTest(stroke, sx, sy) {
     return rectHit(this.bounds(stroke), sx, sy);
+}
+
+function rectFromPoints(points) {
+    const p0 = points[0], p1 = points[points.length - 1];
+    return {
+        x: Math.min(p0.x, p1.x),
+        y: Math.min(p0.y, p1.y),
+        width: Math.abs(p1.x - p0.x),
+        height: Math.abs(p1.y - p0.y),
+    };
+}
+
+// Opaque on purpose: if the original pixels are unavailable, hide the region
+// rather than leave it readable.
+function renderCensorPlaceholder(cr, r) {
+    if (r.width <= 0 || r.height <= 0)
+        return;
+    cr.save();
+    cr.rectangle(r.x, r.y, r.width, r.height);
+    cr.clip();
+    cr.setSourceRGBA(0.45, 0.45, 0.45, 1.0);
+    cr.paint();
+    cr.setSourceRGBA(0.65, 0.65, 0.65, 1.0);
+    cr.setLineWidth(2);
+    for (let d = -r.height; d < r.width; d += 10) {
+        cr.moveTo(r.x + d, r.y + r.height);
+        cr.lineTo(r.x + d + r.height, r.y);
+    }
+    cr.stroke();
+    cr.restore();
 }
 
 export const TOOLS = [
@@ -117,6 +148,27 @@ export const TOOLS = [
             const p0 = stroke.points[0], p1 = stroke.points[stroke.points.length - 1];
             cr.rectangle(Math.min(p0.x, p1.x), Math.min(p0.y, p1.y), Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y));
             cr.fill();
+        },
+    },
+    {
+        id: 'censor',
+        name: 'Censor',
+        icon: 'icons/checkerboard-big-symbolic.svg',
+        keybindings: [Clutter.KEY_0, Clutter.KEY_agrave, Clutter.KEY_x],
+        isDrawing: true,
+        hasStyle: false,
+        beginStroke: () => ({}),
+        bounds: makeStrokeBounds(() => SELECTION_PADDING),
+        hitTest: standardHitTest,
+        render(cr, stroke, _lineWidth) {
+            if (stroke.points.length < 2)
+                return;
+            const dst = rectFromPoints(stroke.points);
+            if (!stroke.source || !(stroke.sourcePoints?.length >= 2)) {
+                renderCensorPlaceholder(cr, dst);
+                return;
+            }
+            pixelate(cr, stroke.source, rectFromPoints(stroke.sourcePoints), dst);
         },
     },
     {

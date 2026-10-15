@@ -84,7 +84,8 @@ export const Toolbar = GObject.registerClass({
     }
 
     _updateDrawingControlsSensitivity() {
-        const drawing = this._currentToolIsDrawing();
+        const tool = TOOLS.find(t => t.id === this._selectedTool);
+        const drawing = this._currentToolIsDrawing() && tool?.hasStyle !== false;
         const hasSelection = this._hasSelection?.() ?? false;
         const enabled = drawing || hasSelection;
 
