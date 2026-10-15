@@ -117,6 +117,15 @@ test('rectangle entirely outside the image draws nothing', () => {
     assertOutsideUnchanged(before, after, { x: 0, y: 0, width: 0, height: 0 });
 });
 
+test('fractional rectangle edges are fully covered, never blended with the original', () => {
+    const src = noiseSurface(32, 32);
+    const rect = { x: 4.5, y: 4.5, width: 16, height: 16 };   // 2x2 blocks
+    const px = readPixels(censorInPlace(src, rect));
+    const covered = { x: 4, y: 4, width: 17, height: 17 };    // every pixel the box touches
+    const colours = uniqueColours(px, covered);
+    assert(colours.size <= 4, `expected <= 4 block colours, got ${colours.size} (edge blending)`);
+});
+
 test('destination may be scaled relative to source (preview case)', () => {
     const src = noiseSurface(64, 64);
     const target = blankSurface(32, 32);

@@ -32,7 +32,16 @@ export function pixelate(cr, source, srcRect, dstRect, blockPx = CENSOR_BLOCK_PX
     const clamped = clampToSource(source, srcRect, dstRect);
     if (!clamped)
         return;
-    const { src, dst } = clamped;
+    const { src } = clamped;
+    // Snap outward to whole pixels: an antialiased fractional clip would blend
+    // original pixels into the box edge.
+    const x0 = Math.floor(clamped.dst.x), y0 = Math.floor(clamped.dst.y);
+    const dst = {
+        x: x0,
+        y: y0,
+        width: Math.ceil(clamped.dst.x + clamped.dst.width) - x0,
+        height: Math.ceil(clamped.dst.y + clamped.dst.height) - y0,
+    };
 
     const blocksX = Math.max(1, Math.floor(src.width / blockPx));
     const blocksY = Math.max(1, Math.floor(src.height / blockPx));
