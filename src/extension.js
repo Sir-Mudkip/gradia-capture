@@ -10,6 +10,7 @@ import St from 'gi://St';
 
 import { Toolbar, TRASH_BUTTON_RADIUS } from './topBar.js';
 import { TOOLS, TOOL_SHORTCUTS } from './tools.js';
+import { stageToSnapshot, stageToCapture } from './geometry.js';
 import { GradiaSettings } from './settings.js';
 import { captureAndStoreScreenshot } from './screenshotStore.js';
 import { ResolutionOverlay } from './resolutionOverlay.js';
@@ -348,7 +349,7 @@ const DrawingCanvas = GObject.registerClass(
                     text: stroke.text,
                     source: censorSource?.surface ?? null,
                     sourcePoints: censorSource
-                        ? stroke.stagePoints.map(sp => ({ x: sp.x * censorSource.scale, y: sp.y * censorSource.scale }))
+                        ? stageToSnapshot(stroke.stagePoints, censorSource.scale)
                         : null,
                 }, stroke.strokeWidth);
             }
@@ -823,10 +824,7 @@ export default class GradiaCompanion extends Extension {
             if (!tool?.render)
                 continue;
 
-            const converted = stroke.stagePoints.map(p => ({
-                x: (p.x / stageScale - selX) * scaleX,
-                y: (p.y / stageScale - selY) * scaleY,
-            }));
+            const converted = stageToCapture(stroke.stagePoints, { selX, selY, stageScale, scaleX, scaleY });
 
             const lw = stroke.strokeWidth * ((scaleX + scaleY) / 2);
 
