@@ -2,8 +2,10 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import Clutter from 'gi://Clutter';
 import Cairo from 'gi://cairo';
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import { Toolbar, TRASH_BUTTON_RADIUS } from './topBar.js';
@@ -45,6 +47,15 @@ function getToolDef(id) {
     return TOOLS.find(t => t.id === id) ?? null;
 }
 
+function surfaceFromPixbuf(pixbuf) {
+    const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, pixbuf.get_width(), pixbuf.get_height());
+    const cr = new Cairo.Context(surface);
+    imports.gi.Gdk.cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
+    cr.paint();
+    cr.$dispose();
+    return surface;
+}
+
 const DrawingCanvas = GObject.registerClass(
     class DrawingCanvas extends St.DrawingArea {
         _init(params) {
@@ -65,6 +76,7 @@ const DrawingCanvas = GObject.registerClass(
             this._dragGrab = null;
             this._stampCounter = 1;
             this._selectedStroke = null;
+            this._censorSource = null;
 
             this._scaleX = 1;
             this._scaleY = 1;
@@ -80,6 +92,11 @@ const DrawingCanvas = GObject.registerClass(
             this._toolId = id;
             if (id !== 'drag')
                 this._selectedStroke = null;
+        }
+
+        setCensorSource(source) {
+            this._censorSource = source;
+            this.queue_repaint();
         }
         setStrokeWidth(w) { this._strokeWidth = w; }
 
@@ -323,11 +340,16 @@ const DrawingCanvas = GObject.registerClass(
                     .map(sp => this._stageToLocal(sp.x, sp.y))
                     .filter(p => p !== null);
 
+                const censorSource = stroke.toolId === 'censor' ? this._censorSource : null;
                 tool.render(cr, {
                     color: stroke.color,
                     points: localPoints,
                     counter: stroke.toolId === 'stamp' ? stampCounter++ : stroke.counter,
                     text: stroke.text,
+                    source: censorSource?.surface ?? null,
+                    sourcePoints: censorSource
+                        ? stroke.stagePoints.map(sp => ({ x: sp.x * censorSource.scale, y: sp.y * censorSource.scale }))
+                        : null,
                 }, stroke.strokeWidth);
             }
 
@@ -390,6 +412,9 @@ export default class GradiaCompanion extends Extension {
         this._bins = [];
         this._textEntry = null;
         this._pendingTextStroke = null;
+        this._censorSource = null;
+        this._censorSourcePending = false;
+        this._censorSession = 0;
 
         this._dragToolActive = false;
         this._dragToolStartX = 0;
@@ -790,6 +815,9 @@ export default class GradiaCompanion extends Extension {
         imports.gi.Gdk.cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
         cr.paint();
 
+        // Censor samples the capture as it was, never other annotations.
+        const censorSource = strokes.some(s => s.toolId === 'censor') ? surfaceFromPixbuf(pixbuf) : null;
+
         for (const stroke of strokes) {
             const tool = getToolDef(stroke.toolId);
             if (!tool?.render)
@@ -802,11 +830,14 @@ export default class GradiaCompanion extends Extension {
 
             const lw = stroke.strokeWidth * ((scaleX + scaleY) / 2);
 
+            const isCensor = stroke.toolId === 'censor';
             tool.render(cr, {
                 color: stroke.color,
                 points: converted,
                 counter: stroke.counter,
                 text: stroke.text,
+                source: isCensor ? censorSource : null,
+                sourcePoints: isCensor ? converted : null,
             }, lw);
         }
 
@@ -991,6 +1022,36 @@ export default class GradiaCompanion extends Extension {
         };
     }
 
+    async _ensureCensorSource() {
+        if (this._censorSource || this._censorSourcePending)
+            return;
+        const content = Main.screenshotUI._stageScreenshot?.get_content();
+        if (!content)
+            return;
+
+        this._censorSourcePending = true;
+        const session = this._censorSession;
+        try {
+            const stream = Gio.MemoryOutputStream.new_resizable();
+            const pixbuf = await Shell.Screenshot.composite_to_stream(
+                content.get_texture(), 0, 0, -1, -1, 1, null, 0, 0, 1, stream);
+            stream.close(null);
+            if (session !== this._censorSession)
+                return;
+            this._censorSource = {
+                surface: surfaceFromPixbuf(pixbuf),
+                scale: pixbuf.get_width() / global.stage.width,
+            };
+            for (const canvas of this._canvases)
+                canvas.setCensorSource(this._censorSource);
+        } catch (e) {
+            console.error(`Gradia Capture: censor snapshot failed: ${e.message}`);
+        } finally {
+            if (session === this._censorSession)
+                this._censorSourcePending = false;
+        }
+    }
+
     _isDrawingTool(id) {
         return getToolDef(id)?.isDrawing ?? false;
     }
@@ -1006,6 +1067,9 @@ export default class GradiaCompanion extends Extension {
 
         const drawing = this._isDrawingTool(id);
         const dragging = id === 'drag';
+
+        if (id === 'censor')
+            this._ensureCensorSource();
 
         for (const canvas of this._canvases)
             canvas.setTool(id);
@@ -1378,6 +1442,9 @@ export default class GradiaCompanion extends Extension {
     }
 
     _removeUI() {
+        this._censorSession++;
+        this._censorSource = null;
+        this._censorSourcePending = false;
         this._cancelTextEntry();
         this._destroyTrashButton();
 

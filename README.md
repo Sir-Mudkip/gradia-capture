@@ -1,3 +1,7 @@
+> **Fork of [AlexanderVanhee/gradia-capture](https://github.com/AlexanderVanhee/gradia-capture)**
+> for [Sivablue](https://github.com/Sir-Mudkip/Sivablue). Adds a **Censor** tool
+> (shortcut `0` / `x`) that pixelates a dragged rectangle the way the Gradia app
+> does. Unit tests: `tests/run.sh`.
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/03ba0ce8-aa83-4f9e-b829-23a66ec599cc" alt="logo" width="150"/>
